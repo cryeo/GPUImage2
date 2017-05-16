@@ -17,6 +17,7 @@ open class BasicOperation: ImageProcessingOperation {
     public var overriddenOutputRotation:Rotation?
     public var backgroundColor = Color.black
     public var drawUnmodifiedImageOutsideOfMask:Bool = true
+    public var skipOperation:Bool = true
     public var mask:ImageSource? {
         didSet {
             if let mask = mask {
@@ -48,7 +49,7 @@ open class BasicOperation: ImageProcessingOperation {
     let usesAspectRatio:Bool
     let maskImageRelay = ImageRelay()
     var maskFramebuffer:Framebuffer?
-    
+
     // MARK: -
     // MARK: Initialization and teardown
 
@@ -57,7 +58,7 @@ open class BasicOperation: ImageProcessingOperation {
         self.shader = shader
         usesAspectRatio = shader.uniformIndex("aspectRatio") != nil
     }
-    
+
     public init(vertexShader:String? = nil, fragmentShader:String, numberOfInputs:UInt = 1, operationName:String = #file) {
         let compiledShader = crashOnShaderCompileFailure(operationName){try sharedImageProcessingContext.programForVertexShader(vertexShader ?? defaultVertexShaderForInputs(numberOfInputs), fragmentShader:fragmentShader)}
         self.maximumInputs = numberOfInputs
@@ -76,14 +77,14 @@ open class BasicOperation: ImageProcessingOperation {
         self.shader = compiledShader
         usesAspectRatio = shader.uniformIndex("aspectRatio") != nil
     }
-    
+
     deinit {
         debugPrint("Deallocating operation: \(self)")
     }
-    
+
     // MARK: -
     // MARK: Rendering
-    
+
     public func newFramebufferAvailable(_ framebuffer:Framebuffer, fromSourceIndex:UInt) {
         if let previousFramebuffer = inputFramebuffers[fromSourceIndex] {
             previousFramebuffer.unlock()
@@ -95,20 +96,20 @@ open class BasicOperation: ImageProcessingOperation {
             updateTargetsWithFramebuffer(framebuffer)
             return
         }
-        
+
         if (UInt(inputFramebuffers.count) >= maximumInputs) {
             renderFrame()
-            
+
             updateTargetsWithFramebuffer(outputFramebuffer)
         }
     }
-    
+
     func renderFrame() {
         renderFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:sizeOfInitialStageBasedOnFramebuffer(inputFramebuffers[0]!), stencil:mask != nil)
-        
+
         let textureProperties = initialTextureProperties()
         configureFramebufferSpecificUniforms(inputFramebuffers[0]!)
-        
+
         renderFramebuffer.activateFramebufferForRendering()
         clearFramebufferWithColor(backgroundColor)
         if let maskFramebuffer = maskFramebuffer {
@@ -122,27 +123,32 @@ open class BasicOperation: ImageProcessingOperation {
             internalRenderFunction(inputFramebuffers[0]!, textureProperties:textureProperties)
         }
     }
-    
+
     func internalRenderFunction(_ inputFramebuffer:Framebuffer, textureProperties:[InputTextureProperties]) {
-        renderQuadWithShader(shader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
+        if (skipOperation) {
+            renderQuadWithShader(sharedImageProcessingContext.passthroughShader, vertices:standardImageVertices, inputTextures:textureProperties)
+        }
+        else {
+            renderQuadWithShader(shader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
+        }
         releaseIncomingFramebuffers()
     }
-    
+
     func releaseIncomingFramebuffers() {
         var remainingFramebuffers = [UInt:Framebuffer]()
         // If all inputs are still images, have this output behave as one
         renderFramebuffer.timingStyle = .stillImage
-        
+
         var latestTimestamp:Timestamp?
         for (key, framebuffer) in inputFramebuffers {
-            
+
             // When there are multiple transient input sources, use the latest timestamp as the value to pass along
             if let timestamp = framebuffer.timingStyle.timestamp {
                 if !(timestamp < (latestTimestamp ?? timestamp)) {
                     latestTimestamp = timestamp
                     renderFramebuffer.timingStyle = .videoFrame(timestamp:timestamp)
                 }
-                
+
                 framebuffer.unlock()
             } else {
                 remainingFramebuffers[key] = framebuffer
@@ -150,7 +156,7 @@ open class BasicOperation: ImageProcessingOperation {
         }
         inputFramebuffers = remainingFramebuffers
     }
-    
+
     func sizeOfInitialStageBasedOnFramebuffer(_ inputFramebuffer:Framebuffer) -> GLSize {
         if let outputSize = overriddenOutputSize {
             return GLSize(outputSize)
@@ -158,10 +164,10 @@ open class BasicOperation: ImageProcessingOperation {
             return inputFramebuffer.sizeForTargetOrientation(.portrait)
         }
     }
-    
+
     func initialTextureProperties() -> [InputTextureProperties] {
         var inputTextureProperties = [InputTextureProperties]()
-        
+
         if let outputRotation = overriddenOutputRotation {
             for framebufferIndex in 0..<inputFramebuffers.count {
                 inputTextureProperties.append(inputFramebuffers[UInt(framebufferIndex)]!.texturePropertiesForOutputRotation(outputRotation))
@@ -171,21 +177,21 @@ open class BasicOperation: ImageProcessingOperation {
                 inputTextureProperties.append(inputFramebuffers[UInt(framebufferIndex)]!.texturePropertiesForTargetOrientation(.portrait))
             }
         }
-        
+
         return inputTextureProperties
     }
-    
+
     func configureFramebufferSpecificUniforms(_ inputFramebuffer:Framebuffer) {
         if usesAspectRatio {
             let outputRotation = overriddenOutputRotation ?? inputFramebuffer.orientation.rotationNeededForOrientation(.portrait)
             uniformSettings["aspectRatio"] = inputFramebuffer.aspectRatioForRotation(outputRotation)
         }
     }
-    
+
     public func transmitPreviousImage(to target:ImageConsumer, atIndex:UInt) {
         sharedImageProcessingContext.runOperationAsynchronously{
             guard let renderFramebuffer = self.renderFramebuffer, (!renderFramebuffer.timingStyle.isTransient()) else { return }
-            
+
             renderFramebuffer.lock()
             target.newFramebufferAvailable(renderFramebuffer, fromSourceIndex:atIndex)
         }
