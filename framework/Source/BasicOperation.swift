@@ -96,6 +96,11 @@ open class BasicOperation: ImageProcessingOperation {
             updateTargetsWithFramebuffer(framebuffer)
             return
         }
+        
+        guard (!skipOperation) else {
+            updateTargetsWithFramebuffer(framebuffer)
+            return
+        }
 
         if (UInt(inputFramebuffers.count) >= maximumInputs) {
             renderFrame()
@@ -125,12 +130,7 @@ open class BasicOperation: ImageProcessingOperation {
     }
 
     func internalRenderFunction(_ inputFramebuffer:Framebuffer, textureProperties:[InputTextureProperties]) {
-        if (skipOperation) {
-            renderQuadWithShader(sharedImageProcessingContext.passthroughShader, vertices:standardImageVertices, inputTextures:textureProperties)
-        }
-        else {
-            renderQuadWithShader(shader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
-        }
+        renderQuadWithShader(shader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
         releaseIncomingFramebuffers()
     }
 
