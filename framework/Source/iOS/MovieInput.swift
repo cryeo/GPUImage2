@@ -53,7 +53,7 @@ public class MovieInput: ImageSource {
     // MARK: -
     // MARK: Playback control
 
-    public func start() {
+    public func start(_ completionCallback:(() -> Void)? = nil) {
         asset.loadValuesAsynchronously(forKeys:["tracks"], completionHandler:{
             DispatchQueue.global(priority:DispatchQueue.GlobalQueuePriority.default).async(execute: {
                 guard (self.asset.statusOfValue(forKey: "tracks", error:nil) == .loaded) else { return }
@@ -81,6 +81,7 @@ public class MovieInput: ImageSource {
                     if (self.loop) {
                         // TODO: Restart movie processing
                     } else {
+                        completionCallback?()
                         self.endProcessing()
                     }
                 }
