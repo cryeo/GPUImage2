@@ -119,7 +119,7 @@ open class BasicOperation: ImageProcessingOperation {
         clearFramebufferWithColor(backgroundColor)
         if let maskFramebuffer = maskFramebuffer {
             if drawUnmodifiedImageOutsideOfMask {
-                renderQuadWithShader(sharedImageProcessingContext.passthroughShader, uniformSettings:nil, vertices:standardImageVertices, inputTextures:textureProperties)
+                renderQuadWithShader(sharedImageProcessingContext.passthroughShader, uniformSettings:nil, vertexBufferObject:sharedImageProcessingContext.standardImageVBO, inputTextures:textureProperties)
             }
             renderStencilMaskFromFramebuffer(maskFramebuffer)
             internalRenderFunction(inputFramebuffers[0]!, textureProperties:textureProperties)
@@ -130,7 +130,7 @@ open class BasicOperation: ImageProcessingOperation {
     }
 
     func internalRenderFunction(_ inputFramebuffer:Framebuffer, textureProperties:[InputTextureProperties]) {
-        renderQuadWithShader(shader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
+        renderQuadWithShader(shader, uniformSettings:uniformSettings, vertexBufferObject:sharedImageProcessingContext.standardImageVBO, inputTextures:textureProperties)
         releaseIncomingFramebuffers()
     }
 
