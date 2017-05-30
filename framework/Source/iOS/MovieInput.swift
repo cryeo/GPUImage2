@@ -181,6 +181,7 @@ public class MovieInput: ImageSource {
         glTexImage2D(GLenum(GL_TEXTURE_2D), 0, GL_LUMINANCE_ALPHA, GLsizei(bufferWidth / 2), GLsizei(bufferHeight / 2), 0, GLenum(GL_LUMINANCE_ALPHA), GLenum(GL_UNSIGNED_BYTE), CVPixelBufferGetBaseAddressOfPlane(movieFrame, 1))
         
         let movieFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:GLSize(width:GLint(bufferWidth), height:GLint(bufferHeight)), textureOnly:false)
+        movieFramebuffer.lock()
         
         convertYUVToRGB(shader:self.yuvConversionShader, luminanceFramebuffer:luminanceFramebuffer, chrominanceFramebuffer:chrominanceFramebuffer, resultFramebuffer:movieFramebuffer, colorConversionMatrix:conversionMatrix)
         
@@ -208,7 +209,7 @@ public class MovieInput: ImageSource {
         }
         
         let resultFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:GLSize(width:GLint(resultBufferWidth), height:GLint(resultBufferHeight)), textureOnly:false)
-        movieFramebuffer.lock()
+        resultFramebuffer.lock()
         
         let textureProperties:[InputTextureProperties]
         textureProperties = [movieFramebuffer.texturePropertiesForTargetOrientation(resultFramebuffer.orientation)]
@@ -219,6 +220,7 @@ public class MovieInput: ImageSource {
         uniformSettings["angle"] = rotationAngle
         renderQuadWithShader(self.rotationShader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
         movieFramebuffer.unlock()
+        resultFramebuffer.unlock()
         
         CVPixelBufferUnlockBaseAddress(movieFrame, CVPixelBufferLockFlags(rawValue: CVOptionFlags(0)))
         
