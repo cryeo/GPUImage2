@@ -1,10 +1,13 @@
 import AVFoundation
 
+public let RotationFragmentShader = "varying highp vec2 textureCoordinate;\n uniform sampler2D inputImageTexture;\n uniform highp float angle;\n void main() {\n highp vec2 coord = textureCoordinate;\n highp float sin_factor = sin(angle);\n highp float cos_factor = cos(angle);\n coord = vec2(coord.x - 0.5, coord.y - 0.5) * mat2(cos_factor, sin_factor, -sin_factor, cos_factor);\n coord += 0.5;\n gl_FragColor = texture2D(inputImageTexture, coord);\n }\n"
+
 public class MovieInput: ImageSource {
     public let targets = TargetContainer()
     public var runBenchmark = false
     
     let yuvConversionShader:ShaderProgram
+    let rotationShader:ShaderProgram
     let asset:AVAsset
     let assetReader:AVAssetReader
     let playAtActualSpeed:Bool
@@ -15,6 +18,8 @@ public class MovieInput: ImageSource {
 
     var numberOfFramesCaptured = 0
     var totalFrameTimeDuringCapture:Double = 0.0
+    
+    var orientation: ImageOrientation = .portrait
 
     // TODO: Add movie reader synchronization
     // TODO: Someone will have to add back in the AVPlayerItem logic, because I don't know how that works
@@ -23,7 +28,8 @@ public class MovieInput: ImageSource {
         self.playAtActualSpeed = playAtActualSpeed
         self.loop = loop
         self.yuvConversionShader = crashOnShaderCompileFailure("MovieInput"){try sharedImageProcessingContext.programForVertexShader(defaultVertexShaderForInputs(2), fragmentShader:YUVConversionFullRangeFragmentShader)}
-        
+        self.rotationShader = crashOnShaderCompileFailure("MovieInput"){try sharedImageProcessingContext.programForVertexShader(defaultVertexShaderForInputs(1), fragmentShader:RotationFragmentShader)}
+    
         assetReader = try AVAssetReader(asset:self.asset)
         
         let outputSettings:[String:AnyObject] = [(kCVPixelBufferPixelFormatTypeKey as String):NSNumber(value:Int32(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange))]
@@ -37,6 +43,11 @@ public class MovieInput: ImageSource {
         let inputOptions = [AVURLAssetPreferPreciseDurationAndTimingKey:NSNumber(value:true)]
         let inputAsset = AVURLAsset(url:url, options:inputOptions)
         try self.init(asset:inputAsset, playAtActualSpeed:playAtActualSpeed, loop:loop)
+    }
+
+    public convenience init(asset:AVAsset, playAtActualSpeed:Bool = false, loop:Bool = false, orientation: ImageOrientation) throws {
+        try self.init(asset:asset, playAtActualSpeed:playAtActualSpeed, loop:loop)
+        self.orientation = orientation
     }
 
     // MARK: -
@@ -172,10 +183,47 @@ public class MovieInput: ImageSource {
         let movieFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:GLSize(width:GLint(bufferWidth), height:GLint(bufferHeight)), textureOnly:false)
         
         convertYUVToRGB(shader:self.yuvConversionShader, luminanceFramebuffer:luminanceFramebuffer, chrominanceFramebuffer:chrominanceFramebuffer, resultFramebuffer:movieFramebuffer, colorConversionMatrix:conversionMatrix)
-        CVPixelBufferUnlockBaseAddress(movieFrame, CVPixelBufferLockFlags(rawValue:CVOptionFlags(0)))
-
-        movieFramebuffer.timingStyle = .videoFrame(timestamp:Timestamp(withSampleTime))
-        self.updateTargetsWithFramebuffer(movieFramebuffer)
+        
+        var resultBufferHeight: Int = 0
+        var resultBufferWidth: Int = 0
+        var rotationAngle: Float = 0
+        
+        switch (orientation) {
+        case .portrait:
+            resultBufferHeight = bufferWidth
+            resultBufferWidth = bufferHeight
+            rotationAngle = Float.pi / 2
+        case .portraitUpsideDown:
+            resultBufferHeight = bufferWidth
+            resultBufferWidth = bufferHeight
+            rotationAngle = -Float.pi / 2
+        case .landscapeLeft:
+            resultBufferWidth = bufferWidth
+            resultBufferHeight = bufferHeight
+            rotationAngle = Float.pi
+        case .landscapeRight:
+            resultBufferWidth = bufferWidth
+            resultBufferHeight = bufferHeight
+            rotationAngle = 0
+        }
+        
+        let resultFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:GLSize(width:GLint(resultBufferWidth), height:GLint(resultBufferHeight)), textureOnly:false)
+        movieFramebuffer.lock()
+        
+        let textureProperties:[InputTextureProperties]
+        textureProperties = [movieFramebuffer.texturePropertiesForTargetOrientation(resultFramebuffer.orientation)]
+        
+        resultFramebuffer.activateFramebufferForRendering()
+        clearFramebufferWithColor(Color.black)
+        var uniformSettings = ShaderUniformSettings()
+        uniformSettings["angle"] = rotationAngle
+        renderQuadWithShader(self.rotationShader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
+        movieFramebuffer.unlock()
+        
+        CVPixelBufferUnlockBaseAddress(movieFrame, CVPixelBufferLockFlags(rawValue: CVOptionFlags(0)))
+        
+        resultFramebuffer.timingStyle = .videoFrame(timestamp:Timestamp(withSampleTime))
+        self.updateTargetsWithFramebuffer(resultFramebuffer)
         
         if self.runBenchmark {
             let currentFrameTime = (CFAbsoluteTimeGetCurrent() - startTime)
