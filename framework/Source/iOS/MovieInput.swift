@@ -54,8 +54,8 @@ public class MovieInput: ImageSource {
     // MARK: Playback control
 
     public func start(_ completionCallback:(() -> Void)? = nil) {
-        asset.loadValuesAsynchronously(forKeys:["tracks"], completionHandler:{
-            DispatchQueue.global(priority:DispatchQueue.GlobalQueuePriority.default).async(execute: {
+        asset.loadValuesAsynchronously(forKeys:["tracks"]) {
+            DispatchQueue.global(qos: .userInitiated).async {
                 guard (self.asset.statusOfValue(forKey: "tracks", error:nil) == .loaded) else { return }
 
                 guard self.assetReader.startReading() else {
@@ -85,8 +85,8 @@ public class MovieInput: ImageSource {
                         self.endProcessing()
                     }
                 }
-            })
-        })
+            }
+        }
     }
     
     public func cancel() {
@@ -210,18 +210,16 @@ public class MovieInput: ImageSource {
         }
         
         let resultFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:GLSize(width:GLint(resultBufferWidth), height:GLint(resultBufferHeight)), textureOnly:false)
-        resultFramebuffer.lock()
+        
         
         let textureProperties:[InputTextureProperties]
         textureProperties = [movieFramebuffer.texturePropertiesForTargetOrientation(resultFramebuffer.orientation)]
-        
         resultFramebuffer.activateFramebufferForRendering()
         clearFramebufferWithColor(Color.black)
         var uniformSettings = ShaderUniformSettings()
         uniformSettings["angle"] = rotationAngle
         renderQuadWithShader(self.rotationShader, uniformSettings:uniformSettings, vertices:standardImageVertices, inputTextures:textureProperties)
         movieFramebuffer.unlock()
-        resultFramebuffer.unlock()
         
         CVPixelBufferUnlockBaseAddress(movieFrame, CVPixelBufferLockFlags(rawValue: CVOptionFlags(0)))
         
