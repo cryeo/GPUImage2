@@ -9,7 +9,7 @@ public class MovieInput: ImageSource {
     let yuvConversionShader:ShaderProgram
     let rotationShader:ShaderProgram
     let asset:AVAsset
-    let assetReader:AVAssetReader
+    var assetReader:AVAssetReader!
     let playAtActualSpeed:Bool
     let loop:Bool
     var videoEncodingIsFinished = false
@@ -30,12 +30,6 @@ public class MovieInput: ImageSource {
         self.yuvConversionShader = crashOnShaderCompileFailure("MovieInput"){try sharedImageProcessingContext.programForVertexShader(defaultVertexShaderForInputs(2), fragmentShader:YUVConversionFullRangeFragmentShader)}
         self.rotationShader = crashOnShaderCompileFailure("MovieInput"){try sharedImageProcessingContext.programForVertexShader(defaultVertexShaderForInputs(1), fragmentShader:RotationFragmentShader)}
     
-        assetReader = try AVAssetReader(asset:self.asset)
-        
-        let outputSettings:[String:AnyObject] = [(kCVPixelBufferPixelFormatTypeKey as String):NSNumber(value:Int32(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange))]
-        let readerVideoTrackOutput = AVAssetReaderTrackOutput(track:self.asset.tracks(withMediaType: AVMediaTypeVideo)[0], outputSettings:outputSettings)
-        readerVideoTrackOutput.alwaysCopiesSampleData = false
-        assetReader.add(readerVideoTrackOutput)
         // TODO: Audio here
     }
 
@@ -53,7 +47,18 @@ public class MovieInput: ImageSource {
     // MARK: -
     // MARK: Playback control
 
+    public func createReader() {
+        assetReader = nil
+        assetReader = try! AVAssetReader(asset:self.asset)
+        
+        let outputSettings:[String:AnyObject] = [(kCVPixelBufferPixelFormatTypeKey as String):NSNumber(value:Int32(kCVPixelFormatType_420YpCbCr8BiPlanarFullRange))]
+        let readerVideoTrackOutput = AVAssetReaderTrackOutput(track:self.asset.tracks(withMediaType: AVMediaTypeVideo)[0], outputSettings:outputSettings)
+        readerVideoTrackOutput.alwaysCopiesSampleData = false
+        assetReader.add(readerVideoTrackOutput)
+    }
+    
     public func start(_ completionCallback:(() -> Void)? = nil) {
+        self.createReader()
         asset.loadValuesAsynchronously(forKeys:["tracks"]) {
             DispatchQueue.global(qos: .userInitiated).async {
                 guard (self.asset.statusOfValue(forKey: "tracks", error:nil) == .loaded) else { return }
@@ -79,7 +84,7 @@ public class MovieInput: ImageSource {
                     self.assetReader.cancelReading()
                     
                     if (self.loop) {
-                        // TODO: Restart movie processing
+                        self.start(completionCallback)
                     } else {
                         completionCallback?()
                         self.endProcessing()
@@ -210,7 +215,6 @@ public class MovieInput: ImageSource {
         }
         
         let resultFramebuffer = sharedImageProcessingContext.framebufferCache.requestFramebufferWithProperties(orientation:.portrait, size:GLSize(width:GLint(resultBufferWidth), height:GLint(resultBufferHeight)), textureOnly:false)
-        
         
         let textureProperties:[InputTextureProperties]
         textureProperties = [movieFramebuffer.texturePropertiesForTargetOrientation(resultFramebuffer.orientation)]
